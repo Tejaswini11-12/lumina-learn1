@@ -5,7 +5,7 @@ import {
   MoreHorizontal, Star, Award, Target, Settings, Shield, LogOut,
   Bell, Layout, CheckCircle, Circle, ArrowRight, Lightbulb, PlayCircle, User, Key, Save,
   ArrowUp, X, Lock, Mail, Globe, AlertTriangle, Loader2, Edit2, Plus, Check, Send, Sparkles,
-  Flame, BarChart2, Activity as ActivityIcon, Book, Beaker, PenTool, Monitor, MessageCircle, Video
+  Flame, BarChart2, Activity as ActivityIcon, Book, Beaker, PenTool, Monitor, MessageCircle, Video, Paperclip
 } from 'lucide-react';
 import { ProfileTab, View, UserProfileData, ScheduleItem } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
@@ -35,6 +35,7 @@ import {
 } from 'firebase/firestore';
 import { Activity } from '../App';
 import VeoCreator from './VeoCreator';
+import { fileToGenerativePart } from '../services/geminiService';
 
 // --- Shared Components ---
 
@@ -1744,15 +1745,27 @@ interface LumaLearnViewProps {
   profile: UserProfileData;
 }
 
+// Define Extended Message Type
+interface Message {
+    role: 'user' | 'model';
+    text: string;
+    fileData?: {
+        mimeType: string;
+        data: string;
+    };
+}
+
 export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onClearPrompt, onAddActivity, profile }) => {
-  const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'chat' | 'video'>('chat');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   
   // Use a ref for chat container to scroll to bottom
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1769,11 +1782,43 @@ export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onC
     }
   }, [initialPrompt]);
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+      // Reset input value so same file can be selected again if cleared
+      e.target.value = '';
+    }
+  };
+
   const handleSend = async (text: string) => {
-    if (!text.trim() || isLoading) return;
+    if ((!text.trim() && !selectedFile) || isLoading) return;
     
-    const userMsg = { role: 'user' as const, text };
+    // Construct user message object
+    const userMsg: Message = { role: 'user', text };
+    
+    if (selectedFile) {
+        try {
+            if (selectedFile.type.startsWith('image/') || selectedFile.type === 'application/pdf') {
+                const base64 = await fileToGenerativePart(selectedFile);
+                userMsg.fileData = { mimeType: selectedFile.type, data: base64 };
+            } else if (selectedFile.type === 'text/plain') {
+                 const textContent = await selectedFile.text();
+                 // Append text content to prompt for extraction
+                 userMsg.text = `${text}\n\n[File Content of ${selectedFile.name}]:\n${textContent}`;
+            } else {
+                 // Fallback for DOCX or others: try base64 inline data
+                 // Note: Gemini 1.5/2.5 often handles generic files if passed as inlineData,
+                 // but text extraction is best. Given constraints, we attempt inlineData.
+                 const base64 = await fileToGenerativePart(selectedFile);
+                 userMsg.fileData = { mimeType: selectedFile.type, data: base64 };
+            }
+        } catch (e) {
+            console.error("File processing error", e);
+        }
+    }
+
     setMessages(prev => [...prev, userMsg]);
+    setSelectedFile(null); // Clear after sending
     setInput('');
     setIsLoading(true);
     
@@ -1782,17 +1827,33 @@ export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onC
 
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        
+        // Reconstruct history with file data
+        const history = messages.map(m => {
+            const parts: any[] = [{ text: m.text }];
+            if (m.fileData) {
+                parts.push({ inlineData: m.fileData });
+            }
+            return { role: m.role, parts };
+        });
+
         const chatSession = ai.chats.create({
             model: 'gemini-2.5-flash',
-            history: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+            history: history,
             config: {
                 systemInstruction: `You are Lumina, a helpful and encouraging AI study assistant. 
                 User Profile: ${JSON.stringify(profile)}. 
                 Tailor your explanations to their education level and subjects.`,
             }
         });
+        
+        // Prepare current message payload
+        const currentParts: any[] = [{ text: userMsg.text }];
+        if (userMsg.fileData) {
+            currentParts.push({ inlineData: userMsg.fileData });
+        }
 
-        const result = await chatSession.sendMessageStream({ message: text });
+        const result = await chatSession.sendMessageStream({ message: currentParts });
         
         let fullText = '';
         setMessages(prev => [...prev, { role: 'model', text: '' }]);
@@ -1883,6 +1944,12 @@ export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onC
                                     : 'bg-gray-50 text-gray-800 rounded-bl-none border border-gray-100'
                                 }`}>
                                     <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                    {msg.fileData && (
+                                        <div className="mt-3 p-2 bg-white/20 rounded-lg text-xs flex items-center gap-2 border border-white/10">
+                                            <Paperclip size={12} />
+                                            <span>Attached File ({msg.fileData.mimeType.split('/')[1] || 'File'})</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -1900,6 +1967,15 @@ export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onC
                 {/* Chat Input */}
                 <div className="p-6 bg-white border-t border-gray-50 z-20 mt-auto">
                     <div className="relative max-w-4xl mx-auto">
+                        {/* File Name Display */}
+                        {selectedFile && (
+                            <div className="absolute bottom-full left-0 mb-3 ml-1 bg-mint-50 text-mint-600 text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border border-mint-100 animate-in fade-in slide-in-from-bottom-2">
+                                <Paperclip size={12} />
+                                <span className="max-w-[200px] truncate font-medium">{selectedFile.name}</span>
+                                <button onClick={() => setSelectedFile(null)} className="hover:bg-mint-100 rounded-full p-0.5"><X size={12} /></button>
+                            </div>
+                        )}
+
                         <input
                             ref={inputRef}
                             type="text"
@@ -1907,16 +1983,35 @@ export const LumaLearnView: React.FC<LumaLearnViewProps> = ({ initialPrompt, onC
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSend(input)}
                             placeholder="Ask away... I don't judge 👀"
-                            className="w-full pl-6 pr-14 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-mint-100 outline-none transition-all text-gray-700 placeholder-gray-400 shadow-inner"
+                            className="w-full pl-6 pr-24 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-mint-100 outline-none transition-all text-gray-700 placeholder-gray-400 shadow-inner"
                             disabled={isLoading}
                         />
-                        <button 
-                            onClick={() => handleSend(input)}
-                            disabled={!input.trim() || isLoading}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-white text-gray-400 rounded-xl hover:text-mint-500 hover:shadow-sm disabled:opacity-50 transition-all"
-                        >
-                            <Send size={20} />
-                        </button>
+                        
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            onChange={handleFileSelect} 
+                            className="hidden" 
+                            accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
+                        />
+
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isLoading}
+                                className="p-2.5 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 hover:text-gray-700 transition-all disabled:opacity-50"
+                                title="Attach file"
+                            >
+                                <Plus size={20} />
+                            </button>
+                            <button 
+                                onClick={() => handleSend(input)}
+                                disabled={(!input.trim() && !selectedFile) || isLoading}
+                                className="p-2.5 bg-white text-gray-400 rounded-xl hover:text-mint-500 hover:shadow-sm disabled:opacity-50 transition-all"
+                            >
+                                <Send size={20} />
+                            </button>
+                        </div>
                     </div>
                     {messages.length === 0 && (
                         <p className="text-center text-[10px] text-gray-300 font-medium mt-4 flex justify-center items-center gap-1">
