@@ -350,6 +350,7 @@ const App: React.FC = () => {
           activeView={activeView} 
           schedules={schedules}
           onNotificationClick={handleNotificationClick}
+          onNavigate={setActiveView}
         />
         
         <main className="px-6 lg:px-10 pb-12 max-w-7xl mx-auto">

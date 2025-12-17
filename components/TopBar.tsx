@@ -8,9 +8,10 @@ interface TopBarProps {
   activeView: View;
   schedules?: ScheduleItem[];
   onNotificationClick?: (date: string) => void;
+  onNavigate: (view: View) => void;
 }
 
-const TopBar: React.FC<TopBarProps> = ({ onProfileClick, activeView, schedules = [], onNotificationClick }) => {
+const TopBar: React.FC<TopBarProps> = ({ onProfileClick, activeView, schedules = [], onNotificationClick, onNavigate }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +48,30 @@ const TopBar: React.FC<TopBarProps> = ({ onProfileClick, activeView, schedules =
     }
   };
 
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const searchTerm = e.currentTarget.value.trim().toLowerCase();
+      
+      const routeMap: Record<string, View> = {
+        'home': View.DASHBOARD,
+        'smart study': View.SMART_STUDY,
+        'practice': View.PRACTICE,
+        'progress': View.PROGRESS,
+        'schedule': View.SCHEDULE,
+        'profile': View.PROFILE,
+        'settings': View.PROFILE
+      };
+
+      const targetView = routeMap[searchTerm];
+
+      if (targetView) {
+        onNavigate(targetView);
+      } else {
+        alert("No matching page found");
+      }
+    }
+  };
+
   return (
     <div className="h-20 w-full flex justify-between items-center px-8 mb-4 relative z-40">
        {(activeView === View.DASHBOARD || activeView === View.PROFILE) ? (
@@ -56,6 +81,7 @@ const TopBar: React.FC<TopBarProps> = ({ onProfileClick, activeView, schedules =
               type="text" 
               placeholder="Search..." 
               className="w-full pl-12 pr-4 py-3 bg-white border border-gray-100 rounded-full text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-mint-100 shadow-sm"
+              onKeyDown={handleSearchKeyDown}
             />
          </div>
        ) : (

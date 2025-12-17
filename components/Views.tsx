@@ -1558,25 +1558,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onLogout, profile, onU
          </button>
       </Card>
 
-      {/* Account Information */}
-      <Card className="p-6">
-         <h3 className="font-bold text-gray-900 text-sm mb-6">Account Information</h3>
-         <div className="space-y-0">
-            <div className="flex justify-between items-center">
-               <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</p>
-                  <p className="text-sm font-medium text-gray-800">{formData.email}</p>
-               </div>
-               <button 
-                 onClick={() => handleEdit('email', formData.email, 'Email')}
-                 className="px-4 py-1.5 bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-blue-100 transition-colors"
-               >
-                 Edit
-               </button>
-            </div>
-         </div>
-      </Card>
-
       {/* Security Settings */}
       <Card className="p-6">
          <h3 className="font-bold text-gray-900 text-sm mb-6">Security Settings</h3>
